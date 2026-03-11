@@ -6,100 +6,123 @@ import (
 	"net"
 	"sync"
 
-	api "your_module/3_1"
+	pb "test-repo/pkg/api/test"
 
 	"github.com/google/uuid"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-type OrderService struct {
-	api.UnimplementedOrderServiceServer
-	orders map[string]*api.Order
+type orderService struct {
+	pb.UnimplementedOrderServiceServer
 	mu     sync.Mutex
+	orders map[string]*pb.Order
 }
 
-func NewOrderService() *OrderService {
-	return &OrderService{
-		orders: make(map[string]*api.Order),
+func newOrderService() *orderService {
+	return &orderService{
+		orders: make(map[string]*pb.Order),
 	}
 }
 
-func (s *OrderService) CreateOrder(ctx context.Context, req *api.CreateOrderRequest) (*api.CreateOrderResponse, error) {
+func (s *orderService) CreateOrder(ctx context.Context, req *pb.CreateOrderRequest) (*pb.CreateOrderResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	id := uuid.New().String()
-	s.orders[id] = &api.Order{
+
+	order := &pb.Order{
 		Id:       id,
 		Item:     req.Item,
 		Quantity: req.Quantity,
 	}
 
-	return &api.CreateOrderResponse{Id: id}, nil
+	s.orders[id] = order
+
+	return &pb.CreateOrderResponse{
+		Id: id,
+	}, nil
 }
 
-func (s *OrderService) GetOrder(ctx context.Context, req *api.GetOrderRequest) (*api.GetOrderResponse, error) {
+func (s *orderService) GetOrder(ctx context.Context, req *pb.GetOrderRequest) (*pb.GetOrderResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	order, ok := s.orders[req.Id]
-	if !ok {
-		return nil, status.Error(codes.NotFound, "")
+	order, exists := s.orders[req.Id]
+	if !exists {
+		return nil, status.Errorf(codes.NotFound, "order not found")
 	}
-	return &api.GetOrderResponse{Order: order}, nil
+
+	return &pb.GetOrderResponse{
+		Order: order,
+	}, nil
 }
 
-func (s *OrderService) UpdateOrder(ctx context.Context, req *api.UpdateOrderRequest) (*api.UpdateOrderResponse, error) {
+func (s *orderService) UpdateOrder(ctx context.Context, req *pb.UpdateOrderRequest) (*pb.UpdateOrderResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	order, ok := s.orders[req.Id]
-	if !ok {
-		return nil, status.Error(codes.NotFound, "")
+	order, exists := s.orders[req.Id]
+	if !exists {
+		return nil, status.Errorf(codes.NotFound, "order not found")
 	}
+
 	order.Item = req.Item
 	order.Quantity = req.Quantity
 
-	return &api.UpdateOrderResponse{Order: order}, nil
+	return &pb.UpdateOrderResponse{
+		Order: order,
+	}, nil
 }
 
-func (s *OrderService) DeleteOrder(ctx context.Context, req *api.DeleteOrderRequest) (*api.DeleteOrderResponse, error) {
+func (s *orderService) DeleteOrder(ctx context.Context, req *pb.DeleteOrderRequest) (*pb.DeleteOrderResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, ok := s.orders[req.Id]
-	if !ok {
-		return nil, status.Error(codes.NotFound, "")
+	_, exists := s.orders[req.Id]
+	if !exists {
+		return nil, status.Errorf(codes.NotFound, "order not found")
 	}
 
 	delete(s.orders, req.Id)
-	return &api.DeleteOrderResponse{Success: true}, nil
+
+	return &pb.DeleteOrderResponse{
+		Success: true,
+	}, nil
 }
 
-func (s *OrderService) ListOrders(ctx context.Context, req *api.ListOrdersRequest) (*api.ListOrdersResponse, error) {
+func (s *orderService) ListOrders(ctx context.Context, req *pb.ListOrdersRequest) (*pb.ListOrdersResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	list := make([]*api.Order, 0, len(s.orders))
+	var orders []*pb.Order
+
 	for _, order := range s.orders {
-		list = append(list, order)
+		orders = append(orders, order)
 	}
 
-	return &api.ListOrdersResponse{Orders: list}, nil
+	return &pb.ListOrdersResponse{
+		Orders: orders,
+	}, nil
 }
 
 func main() {
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to listen: %v", err)
 	}
 
 	grpcServer := grpc.NewServer()
-	api.RegisterOrderServiceServer(grpcServer, NewOrderService())
+
+	service := newOrderService()
+
+	pb.RegisterOrderServiceServer(grpcServer, service)
+
+	log.Println("Server started on port 50051")
 
 	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to serve: %v", err)
 	}
 }
